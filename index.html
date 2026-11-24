@@ -15,7 +15,7 @@
   input{width:100%;background:#fafafb;border:1px solid #e3e4e8;border-radius:12px;padding:11px 13px;color:#14151a;font-size:14px;outline:none;font-family:inherit}
   input:focus{border-color:#6d4aff;background:#fff}
   .cam{position:relative;border-radius:22px;overflow:hidden;background:#ececf1;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;border:1px solid #e3e4e8;cursor:pointer}
-  video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;background:#000}
   video.on{display:block}
   .mirror{transform:scaleX(-1)}
   .frame{position:absolute;inset:0;display:none}
@@ -31,7 +31,7 @@
   .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
   .flash.go{animation:fl .35s ease-out}
   @keyframes fl{0%{opacity:.85}100%{opacity:0}}
-  .load{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(255,255,255,.93);backdrop-filter:blur(6px);z-index:4}
+  .load{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(255,255,255,.96);z-index:4}
   .load.on{display:flex}
   .spin{width:34px;height:34px;border-radius:50%;border:3px solid #ddd6ff;border-top-color:#6d4aff;animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -43,7 +43,7 @@
   .shutter:disabled{opacity:.35;transform:translateX(-50%) scale(.92)}
   .res{background:#fafafb;border:1px solid #e3e4e8;border-radius:22px;padding:18px;margin-top:14px}
   .rTop{display:flex;gap:12px;align-items:center}
-  .thumb{width:56px;height:56px;border-radius:14px;object-fit:cover;border:1px solid #e3e4e8}
+  .thumb{width:56px;height:56px;border-radius:14px;object-fit:cover;border:1px solid #e3e4e8;background:#ececf1}
   .tag{font-size:10px;padding:3px 8px;border-radius:99px;border:1px solid #e3e4e8;color:#6b7280;background:#fff}
   .scoreWrap{display:flex;align-items:baseline;gap:6px;margin-top:14px}
   .num{font-size:52px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
@@ -69,7 +69,7 @@
   <div class="nameRow"><input id="uname" placeholder="なまえ（任意）" autocomplete="off"></div>
 
   <div class="cam" id="cam">
-    <video id="v" playsinline muted autoplay></video>
+    <video id="v" playsinline webkit-playsinline muted autoplay></video>
     <div class="frame" id="frame"><div class="oval"></div><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div>
     <div class="flash" id="flash"></div>
     <div class="load" id="load"><div class="spin"></div><div class="loadText" id="loadText">解析中…</div><div class="loadBar"><span id="loadFill"></span></div></div>
@@ -103,6 +103,7 @@
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const rnd=(a,b)=>a+Math.random()*(b-a);
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const nextFrame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
 
   unameEl.value=localStorage.getItem('fds.name')||'';
   unameEl.oninput=()=>localStorage.setItem('fds.name',unameEl.value);
@@ -120,7 +121,10 @@
     if(stream) return;
     try{
       stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1080},height:{ideal:1440}},audio:false});
-      video.srcObject=stream; video.classList.add('on'); video.classList.toggle('mirror',facing==='user');
+      video.srcObject=stream;
+      video.classList.add('on');
+      video.classList.toggle('mirror',facing==='user');
+      try{ await video.play(); }catch(e){}
       hint.classList.add('hide'); frame.classList.add('on'); shutter.classList.add('on');
     }catch(e){
       hint.classList.remove('hide');
@@ -155,15 +159,58 @@
     loadFill.style.width='0%';
   }
 
-  function grab(scale){
-    const w=video.videoWidth||1080, h=video.videoHeight||1440;
+  async function waitReady(){
+    for(let i=0;i<25;i++){
+      if(video.videoWidth>0 && video.readyState>=2 && !video.paused) return true;
+      try{ if(video.paused) await video.play(); }catch(e){}
+      await sleep(80);
+    }
+    return video.videoWidth>0;
+  }
+
+  async function draw(scale){
+    await waitReady();
+    await nextFrame();
+    const w=video.videoWidth||0, h=video.videoHeight||0;
     const c=document.createElement('canvas');
-    c.width=Math.round(w*scale); c.height=Math.round(h*scale);
-    const ctx=c.getContext('2d');
-    if(facing==='user'){ ctx.translate(c.width,0); ctx.scale(-1,1); }
-    ctx.drawImage(video,0,0,c.width,c.height);
+    c.width=Math.max(2,Math.round((w||720)*scale));
+    c.height=Math.max(2,Math.round((h||960)*scale));
+    const ctx=c.getContext('2d',{willReadFrequently:true});
+    ctx.fillStyle='#111';
+    ctx.fillRect(0,0,c.width,c.height);
+    if(w&&h){
+      if(facing==='user'){ ctx.translate(c.width,0); ctx.scale(-1,1); }
+      ctx.drawImage(video,0,0,c.width,c.height);
+    }
     return c;
   }
+
+  function isBlank(c){
+    try{
+      const t=document.createElement('canvas'); t.width=24; t.height=32;
+      const x=t.getContext('2d',{willReadFrequently:true});
+      x.drawImage(c,0,0,24,32);
+      const d=x.getImageData(0,0,24,32).data;
+      let s=0; for(let i=0;i<d.length;i+=4) s+=d[i]+d[i+1]+d[i+2];
+      return s/((d.length/4)*3) < 8;
+    }catch(e){ return false; }
+  }
+
+  async function capture(scale){
+    let c=await draw(scale);
+    if(isBlank(c)){
+      loadEl.style.visibility='hidden';
+      await sleep(140);
+      for(let i=0;i<3;i++){
+        c=await draw(scale);
+        if(!isBlank(c)) break;
+        await sleep(160);
+      }
+      loadEl.style.visibility='';
+    }
+    return c;
+  }
+
   const toBlob=(c,q)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
 
   async function startRun(){
@@ -174,7 +221,7 @@
     loadOn(wait);
     flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
 
-    const orig=await grab(1);
+    const orig=await capture(1);
     const origBlob=await toBlob(orig,0.95);
     const res=await analyze(orig);
 
@@ -182,7 +229,8 @@
       for(let i=1;i<COUNT;i++){
         await sleep(GAP);
         if(!running) return;
-        const b=await toBlob(grab(0.8),0.72);
+        const c=await capture(0.8);
+        const b=await toBlob(c,0.72);
         if(b) send(b,true);
       }
     })();
